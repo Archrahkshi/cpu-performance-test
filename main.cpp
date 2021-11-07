@@ -13,6 +13,13 @@ inline uint64_t count_ticks() {
     return ((uint64_t) hi << 32) | lo;
 }
 
+/// Amend CPU tick count with respect to rdtsc call time
+inline uint64_t count_ticks_without_call(uint64_t tick_count) {
+    uint64_t call1 = count_ticks();
+    uint64_t call2 = count_ticks();
+    return call2 - call1;
+}
+
 inline void std_benchmark(const std::vector<int> &first, const std::vector<int> &second) {
     uint64_t vector_size = first.size();
 
@@ -27,17 +34,17 @@ inline void std_benchmark(const std::vector<int> &first, const std::vector<int> 
         std1 = static_cast<double>(first[i]);
         std2 = second[i];
 
+        // Dependent operations
         uint64_t start = count_ticks();
-        std3 = std1 + static_cast<double>(std2);
-        std3 = std3 + static_cast<double>(std2);
+        std1 = std1 + static_cast<double>(std2);
         uint64_t end = count_ticks();
-        total_ticks_dependent += end - start;
+        total_ticks_dependent += count_ticks_without_call(end - start);
 
+        // Independent operations
         start = count_ticks();
         std3 = std1 + static_cast<double>(std2);
-        std3 = std1 + static_cast<double>(std2);
         end = count_ticks();
-        total_ticks_independent += end - start;
+        total_ticks_independent += count_ticks_without_call(end - start);
     }
     std::cout << "STD:" << '\n'
               << " Latency: " << (double) total_ticks_dependent / vector_size << " ticks ("
@@ -60,22 +67,25 @@ inline void sse2_benchmark(const std::vector<int> &first, const std::vector<int>
         sse1 = _mm_cvtepi32_pd(_mm_loadu_si128((__m128i *) &first[i]));
         sse2 = _mm_loadu_si128((__m128i *) &second[i]);
 
+        // Dependent operations
         uint64_t start = count_ticks();
-        sse3 = _mm_add_pd(sse1, _mm_castsi128_pd(sse2));
-        sse3 = _mm_add_pd(sse3, _mm_castsi128_pd(sse2));
+        sse1 = _mm_add_pd(sse1, _mm_castsi128_pd(sse2));
         uint64_t end = count_ticks();
-        total_ticks_dependent += end - start;
+        total_ticks_dependent += count_ticks_without_call(end - start);
 
+        // Independent operations
         start = count_ticks();
         sse3 = _mm_add_pd(sse1, _mm_castsi128_pd(sse2));
-        sse3 = _mm_add_pd(sse1, _mm_castsi128_pd(sse2));
         end = count_ticks();
-        total_ticks_independent += end - start;
+        total_ticks_independent += count_ticks_without_call(end - start);
     }
+    // Scaling execution time for accurate comparison
+    total_ticks_dependent *= block_size;
+    total_ticks_independent *= block_size;
     std::cout << "SSE2:" << '\n'
-              << " Latency: " << (double) total_ticks_dependent * block_size / vector_size << " ticks ("
+              << " Latency: " << (double) total_ticks_dependent / vector_size << " ticks ("
               << total_ticks_dependent << " ticks per " << vector_size << " operations)\n"
-              << " Result issue rate: " << (double) total_ticks_independent * block_size / vector_size << " ticks ("
+              << " Result issue rate: " << (double) total_ticks_independent / vector_size << " ticks ("
               << total_ticks_independent << " ticks per " << vector_size << " operations)\n\n";
 }
 
@@ -93,22 +103,25 @@ inline void avx2_benchmark(const std::vector<int> &first, const std::vector<int>
         avx1 = _mm256_castsi256_pd(_mm256_loadu_si256((__m256i *) &first[i]));
         avx2 = _mm256_loadu_si256((__m256i *) &second[i]);
 
+        // Dependent operations
         uint64_t start = count_ticks();
-        avx3 = _mm256_add_pd(avx1, _mm256_castsi256_pd(avx2));
-        avx3 = _mm256_add_pd(avx3, _mm256_castsi256_pd(avx2));
+        avx1 = _mm256_add_pd(avx1, _mm256_castsi256_pd(avx2));
         uint64_t end = count_ticks();
-        total_ticks_dependent += end - start;
+        total_ticks_dependent += count_ticks_without_call(end - start);
 
+        // Independent operations
         start = count_ticks();
         avx3 = _mm256_add_pd(avx1, _mm256_castsi256_pd(avx2));
-        avx3 = _mm256_add_pd(avx1, _mm256_castsi256_pd(avx2));
         end = count_ticks();
-        total_ticks_independent += end - start;
+        total_ticks_independent += count_ticks_without_call(end - start);
     }
+    // Scaling execution time for accurate comparison
+    total_ticks_dependent *= block_size;
+    total_ticks_independent *= block_size;
     std::cout << "AVX2:" << '\n'
-              << " Latency: " << (double) total_ticks_dependent * block_size / vector_size << " ticks ("
+              << " Latency: " << (double) total_ticks_dependent / vector_size << " ticks ("
               << total_ticks_dependent << " ticks per " << vector_size << " operations)\n"
-              << " Result issue rate: " << (double) total_ticks_independent * block_size / vector_size << " ticks ("
+              << " Result issue rate: " << (double) total_ticks_independent / vector_size << " ticks ("
               << total_ticks_independent << " ticks per " << vector_size << " operations)\n\n";
 }
 
@@ -118,8 +131,8 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
     uint64_t size = std::stoi(argv[1]);
-    if (size == 0) {
-        std::cout << "Non-zero vector size expected\n";
+    if (size <= 0) {
+        std::cout << "Vector size > 0 expected\n";
         return EXIT_FAILURE;
     }
     std::vector<int> first(size), second(size);
